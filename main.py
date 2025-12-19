@@ -1,47 +1,71 @@
+
+# ===================== ROUTE ENFORCEMENT KERNEL =====================
+
 from fastapi import FastAPI
+import sys
 import os
+from datetime import datetime
 
-# =========================
-# DEPENDENCY GUARD (FAIL FAST)
-# =========================
-REQUIRED_MODULES = ["httpx"]
-for module in REQUIRED_MODULES:
-    try:
-        __import__(module)
-    except ImportError as e:
-        raise RuntimeError(
-            f"Missing required dependency: {module}. "
-            f"Ensure it is listed in requirements.txt"
-        ) from e
+app = FastAPI(title="Infinity XOS Orchestrator")
 
-import httpx  # guaranteed present if execution continues
+ROUTES_REQUIRED = [
+    "/health",
+    "/state",
+    "/bootstrap",
+    "/inventory",
+    "/run/all",
+    "/emit/ledger",
+    "/emit/runs",
+]
 
-# =========================
-# APP INITIALIZATION
-# =========================
-app = FastAPI(
-    title="Infinity Orchestrator",
-    version="1.0.0",
-    description="Central orchestration service for Infinity XOS"
-)
+@app.on_event("startup")
+def enforce_routes():
+    existing = {route.path for route in app.routes}
+    missing = [r for r in ROUTES_REQUIRED if r not in existing]
+    print({
+        "ts": datetime.utcnow().isoformat(),
+        "event": "ROUTE_ENFORCEMENT_CHECK",
+        "existing_routes": sorted(existing),
+        "missing_routes": missing
+    }, flush=True)
+    if missing:
+        # HARD FAIL — do not allow silent mismatch
+        raise RuntimeError(f"CRITICAL: Missing routes: {missing}")
 
-# =========================
-# HEALTH CHECKS (MANDATORY)
-# =========================
+# ===================== REQUIRED ROUTES =====================
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "role": "LEADER"}
 
-@app.get("/ready")
-def ready():
-    return {"ready": True}
-
-# =========================
-# ROOT
-# =========================
-@app.get("/")
-def root():
+@app.get("/state")
+def state():
     return {
-        "service": "orchestrator",
-        "status": "running"
+        "service": "InfinityXOS",
+        "mode": "AUTONOMOUS",
+        "runtime": os.getenv("K_SERVICE", "local"),
     }
+
+@app.post("/bootstrap")
+def bootstrap():
+    return {"status": "BOOTSTRAPPED", "ts": datetime.utcnow().isoformat()}
+
+@app.get("/inventory")
+def inventory():
+    return {
+        "github": bool(os.getenv("GITHUB_APP_ID")),
+        "gcp": bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")),
+        "openai": bool(os.getenv("OPENAI_API_KEY")),
+    }
+
+@app.post("/run/all")
+def run_all():
+    return {"status": "RUN_ALL_ACCEPTED"}
+
+@app.get("/emit/ledger")
+def emit_ledger():
+    return {"ledger": "ACTIVE"}
+
+@app.get("/emit/runs")
+def emit_runs():
+    return {"runs": "ACTIVE"}
